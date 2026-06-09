@@ -1651,32 +1651,37 @@ function doRegister(){
     const secQ=(document.getElementById('reg-doc-secq').value||'').trim();
     const secA=(document.getElementById('reg-doc-seca').value||'').trim();
 
+    const name=(document.getElementById('reg-name').value||'').trim();
+    const crm=(document.getElementById('reg-crm').value||'').trim();
+    if(!name){alert('Por favor, informe seu nome.');return;}
+    if(!crm){alert('Por favor, informe seu CRM.');return;}
     if(!email){alert('Por favor, informe o e-mail profissional.');return;}
-    // Verifica se o e-mail consta na lista de médicos autorizados
-    const authorizedDoc=CLINIC_DOCTORS.find(d=>d.email && d.email.toLowerCase()===email);
-    if(!authorizedDoc){alert('Este e-mail não está autorizado.\n\nApenas profissionais da SINDOR podem se cadastrar. Entre em contato com a clínica.');return;}
     if(pass.length<8){alert('A senha deve ter no mínimo 8 caracteres.');return;}
     if(!secQ){alert('Selecione uma pergunta de segurança.');return;}
     if(!secA){alert('Informe a resposta à pergunta de segurança.');return;}
     // Verifica duplicidade
     const existing=JSON.parse(localStorage.getItem('sindor_doc_profile_'+email)||'null');
     if(existing){alert('Este e-mail já está cadastrado. Faça login na aba "Entrar".');switchAuthTab('login');return;}
+    // Verifica se é um médico do CLINIC_DOCTORS (usa o id fixo) ou novo médico
+    const knownDoc=CLINIC_DOCTORS.find(d=>d.email && d.email.toLowerCase()===email);
+    const docId = knownDoc ? knownDoc.id : 'doc_'+Date.now();
+    const docRole = knownDoc ? knownDoc.role : 'Médico — SINDOR';
     // Salva perfil do médico
     localStorage.setItem('sindor_doc_profile_'+email, JSON.stringify({
-      id: authorizedDoc.id,
-      name: authorizedDoc.name,
-      role: authorizedDoc.role,
-      crm: authorizedDoc.crm,
+      id: docId,
+      name,
+      role: docRole,
+      crm,
       email,
       pass,
       secQ,
       secA,
     }));
     // Loga diretamente após cadastro
-    window._currentDoctorId   = authorizedDoc.id;
-    window._currentDoctorName = authorizedDoc.name;
-    window._currentDoctorRole = authorizedDoc.role;
-    window._currentDoctorCrm  = authorizedDoc.crm;
+    window._currentDoctorId   = docId;
+    window._currentDoctorName = name;
+    window._currentDoctorRole = docRole;
+    window._currentDoctorCrm  = crm;
     window._currentDoctorEmail= email;
     updateDoctorUI();
     showScreen('dashboard');
@@ -2890,12 +2895,34 @@ function isAuthorized(patientId, doctorId) {
 }
 
 // ── Build doctor checkbox grid ────────────────────────────────────────────────
+function getRegisteredDoctors() {
+  const registered = [];
+  const knownIds = new Set(CLINIC_DOCTORS.map(d => d.id));
+  for(let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if(key && key.startsWith('sindor_doc_profile_')) {
+      try {
+        const p = JSON.parse(localStorage.getItem(key));
+        if(p && p.id && !knownIds.has(p.id)) {
+          registered.push({ id: p.id, name: p.name, role: p.role, crm: p.crm, email: p.email });
+        }
+      } catch(e) {}
+    }
+  }
+  return registered;
+}
+
+function getAllDoctors() {
+  const extra = getRegisteredDoctors();
+  return [...CLINIC_DOCTORS, ...extra];
+}
+
 function buildDoctorGrid(containerId, selectedIds = []) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = '';
 
-  CLINIC_DOCTORS.forEach(doc => {
+  getAllDoctors().forEach(doc => {
     const checked = selectedIds.includes(doc.id);
     const card = document.createElement('div');
     card.className = 'doctor-check-card' + (checked ? ' checked' : '');
@@ -2996,7 +3023,7 @@ function saveConsent() {
 
   saveConsentData(patientId, selectedIds, new Date().toISOString());
 
-  const names = CLINIC_DOCTORS.filter(d => selectedIds.includes(d.id)).map(d => d.name.split(' ').slice(0,2).join(' '));
+  const names = getAllDoctors().filter(d => selectedIds.includes(d.id)).map(d => d.name.split(' ').slice(0,2).join(' '));
   showToast(`Preferências salvas. Acesso autorizado para: ${names.join(', ')}.`, 'success');
 
   setTimeout(() => goBackFromConsent(), 1200);
@@ -3251,10 +3278,17 @@ function confirmDeleteAccount(){
     const allConsent=JSON.parse(localStorage.getItem('sindor_consent')||'{}');
     let changed=false;
 
-    // Build email→id map from CLINIC_DOCTORS
+    // Build email→id map from all doctors (CLINIC_DOCTORS + registered)
     const emailToId={};
     if(typeof CLINIC_DOCTORS!=='undefined'){
       CLINIC_DOCTORS.forEach(d=>{ if(d.email) emailToId[d.email.toLowerCase()]=d.id; });
+    }
+    // Also include dynamically registered doctors
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith('sindor_doc_profile_')){
+        try{ const p=JSON.parse(localStorage.getItem(k)); if(p&&p.email&&p.id) emailToId[p.email.toLowerCase()]=p.id; }catch(e){}
+      }
     }
 
     Object.values(allConsent).forEach(consent=>{
